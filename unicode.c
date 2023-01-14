@@ -507,6 +507,8 @@ size_t enc_utf32_to_utf8(utf8_char_t *dest, size_t *dest_size, utf32_char_t *src
 /* -*- buffer sizing functions -*- */
 /* ******************************* */
 
+#include <stdio.h>
+
 size_t utf8_in_utf16_len(utf8_char_t *str, bool)
 {
     // This is the resulting UTF-16 length.
@@ -514,16 +516,18 @@ size_t utf8_in_utf16_len(utf8_char_t *str, bool)
 
     // Loop through the string until we encounter a null-terminator.
     // `c` is the leading bit of each UTF-8 codepoint sequence.
-    for (utf8_char_t c = (*str); c; c = (*str++))
+    for (utf8_char_t c = (*str); c; c = (*str))
     {
         // Lookup how many chars trail this one, skip to the next leading char.
         size_t trailing_chars = UTF8_TRAILING_COUNT[c];
-        str += trailing_chars;
+        str += trailing_chars + 1;
 
         // This just so happens to collide, which is nice.
         // Any codepoint that takes 4 chars in UTF-8 takes 2 chars in UTF-16.
         // All other codepoints take 1 char in UTF-16;
         length += ((trailing_chars == 3) ? 2 : 1);
+
+        printf("0x%02X\n", c);
     }
 
     // Return the calculated result.
@@ -537,11 +541,11 @@ size_t utf8_in_utf32_len(utf8_char_t *str, bool)
 
     // Loop through the string until we encounter a null-terminator.
     // `c` is the leading bit of each UTF-8 codepoint sequence.
-    for (utf8_char_t c = (*str); c; c = (*str++))
+    for (utf8_char_t c = (*str); c; c = (*str))
     {
         // Lookup how many chars trail this one, skip to the next leading char.
         size_t trailing_chars = UTF8_TRAILING_COUNT[c];
-        str += trailing_chars;
+        str += trailing_chars + 1;
 
         // UTF-32 takes one char per codepoint.
         length++;
