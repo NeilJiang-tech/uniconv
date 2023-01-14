@@ -55,6 +55,9 @@ static const unipoint_t UNICODE_FINAL_POINT     = 0x10FFFF;
 // The maximum number of characters in a UTF-8 sequence
 static const size_t UTF8_SEQ_MAX_CHARS          = 4;
 
+// Unicode replacement character. This is used to replace invalid sequences.
+static const unipoint_t UNICODE_REPL_CHAR       = 0xFFFD;
+
 // Number of bytes used to encode a single codepoint in UTF-8 indexed by the first byte.
 // That is, the first byte of a UTF-8 encoded codepoint can be used as the index to this
 //   table, and the resulting value is the number of following bytes needed to decode
@@ -307,8 +310,8 @@ static inline unipoint_t __codepoint_from_utf8(utf8_char_t *src, size_t src_size
         if (consumed)
             (*consumed) = src_size;
 
-        // Return a NULL codepoint.
-        return 0;
+        // Return replacement character.
+        return UNICODE_REPL_CHAR;
     }
 
     // Anything more than UTF8_SEQ_MAX_CHARS chars is a malformed codepoint.
@@ -318,8 +321,8 @@ static inline unipoint_t __codepoint_from_utf8(utf8_char_t *src, size_t src_size
         if (consumed)
             (*consumed) = (trailing_chars + 1);
 
-        // Return a NULL codepoint.
-        return 0;
+        // Return replacement character.
+        return UNICODE_REPL_CHAR;
     }
 
     // Decode the codepoint from the buffer with the given char count.
@@ -331,7 +334,7 @@ static inline unipoint_t __codepoint_from_utf8(utf8_char_t *src, size_t src_size
 
     // Verify this is a valid unicode codepoint.
     if (__codepoint_is_valid(codepoint))
-        return 0; // This is an invalid codepoint.
+        return UNICODE_REPL_CHAR; // This was an invalid codepoint.
 
     // Return the calculated result without encoding metadata.
     return codepoint;
@@ -352,8 +355,8 @@ static inline unipoint_t __codepoint_from_utf16(utf16_char_t *src, size_t src_si
             if (consumed)
                 (*consumed) = 1;
 
-            // Return a NULL codepoint.
-            return 0;
+            // Return replacement character.
+            return UNICODE_REPL_CHAR;
         }
 
         // Read the next character in, swapping if requested.
@@ -367,8 +370,8 @@ static inline unipoint_t __codepoint_from_utf16(utf16_char_t *src, size_t src_si
             if (consumed)
                 (*consumed) = 1;
 
-            // Return a NULL codepoint.
-            return 0;
+            // Return replacement character.
+            return UNICODE_REPL_CHAR;
         }
 
         // Decode the two character codepoint.
@@ -380,7 +383,7 @@ static inline unipoint_t __codepoint_from_utf16(utf16_char_t *src, size_t src_si
 
         // Verify this is a valid unicode codepoint.
         if (__codepoint_is_valid(codepoint))
-            return 0; // This is an invalid codepoint.
+            return UNICODE_REPL_CHAR; // This was an invalid codepoint.
 
         // Everything is ok.
         return codepoint;
@@ -390,8 +393,8 @@ static inline unipoint_t __codepoint_from_utf16(utf16_char_t *src, size_t src_si
         if (consumed)
             (*consumed) = 1;
 
-        // Return a NULL codepoint.
-        return 0;
+        // Return a replacement character.
+        return UNICODE_REPL_CHAR;
     } else {
         if (consumed)
             (*consumed) = 1;
@@ -413,7 +416,7 @@ static inline unipoint_t __codepoint_from_utf32(utf32_char_t *src, size_t src_si
 
     // And ensure this is a valid codepoint
     if (__codepoint_is_valid(codepoint))
-        return 0; // This is an invalid codepoint.
+        return UNICODE_REPL_CHAR; // This was an invalid codepoint.
 
     // Just cast.
     return codepoint;
