@@ -111,6 +111,9 @@ static const utf8_char_t UTF8_INITIAL_MASK[5] = {
 static inline int __codepoint_is_valid(unipoint_t codepoint);
 
 
+// Calculate the number of characters needed to encode the provided codepoint.
+static inline size_t __utf8_chars_for_codepoint(unipoint_t codepoint);
+
 // Raw decode for UTF-8 given a sequence buffer and a char count.
 static inline unipoint_t __utf8_decode(utf8_char_t *src, size_t cnt);
 
@@ -163,6 +166,19 @@ static inline int __codepoint_is_valid(unipoint_t codepoint)
 /* -*- static helpers for conversion between code points and UTF8/16/32 -*- */
 /* ************************************************************************ */
 
+static inline size_t __utf8_chars_for_codepoint(unipoint_t codepoint)
+{
+    if (codepoint < UTF8_ONE_CHAR_LIMIT) {
+        return 1;
+    } else if (codepoint < UTF8_TWO_CHAR_LIMIT) {
+        return 2;
+    } else if (codepoint < UTF8_THREE_CHAR_LIMIT) {
+        return 3;
+    } else {
+        return 4;
+    }
+}
+
 static inline unipoint_t __utf8_decode(utf8_char_t *src, size_t cnt)
 {
     // This is where we calculate the final codepoint.
@@ -201,20 +217,17 @@ static inline unipoint_t __utf16_decode(utf16_char_t leading_char, utf16_char_t 
 
 static inline size_t __utf8_from_codepoint(unipoint_t codepoint, utf8_char_t *dest, size_t dest_size, bool)
 {
-    size_t char_count;
-
-    // Determine how many chars we will need to encode this codepoint.
-    if (codepoint < UTF8_ONE_CHAR_LIMIT) {
+    // Shortcut for one-char encoding
+    if (codepoint < UTF8_ONE_CHAR_LIMIT)
+    {
+        // Just copy.
         (*dest) = codepoint;
 
         return 1;
-    } else if (codepoint < UTF8_TWO_CHAR_LIMIT) {
-        char_count = 2;
-    } else if (codepoint < UTF8_THREE_CHAR_LIMIT) {
-        char_count = 3;
-    } else {
-        char_count = 4;
     }
+
+    // Determine how many chars we will need to encode this codepoint.
+    size_t char_count = __utf8_chars_for_codepoint(codepoint);
 
     // Bounds check destination buffer.
     if (char_count > dest_size)
@@ -301,10 +314,10 @@ static inline unipoint_t __codepoint_from_utf8(utf8_char_t *src, size_t src_size
     utf8_char_t leading_char = (*src);
 
     // Use the leading char to determine how many chars to consume.
-    size_t trailing_chars = UTF8_TRAILING_COUNT[leading_char];
+    size_t char_count = UTF8_TRAILING_COUNT[leading_char] + 1;
 
     // Ensure the buffer holds a full codepoint based on the calculated number of chars.
-    if (src_size < trailing_chars)
+    if (src_size < char_count)
     {
         // We don't have enough bytes...
         if (consumed)
@@ -315,26 +328,30 @@ static inline unipoint_t __codepoint_from_utf8(utf8_char_t *src, size_t src_size
     }
 
     // Anything more than UTF8_SEQ_MAX_CHARS chars is a malformed codepoint.
-    if (trailing_chars > (UTF8_SEQ_MAX_CHARS - 1))
+    if (char_count > UTF8_SEQ_MAX_CHARS)
     {
         // This is malformed.
         if (consumed)
-            (*consumed) = (trailing_chars + 1);
+            (*consumed) = char_count;
 
         // Return replacement character.
         return UNICODE_REPL_CHAR;
     }
 
     // Decode the codepoint from the buffer with the given char count.
-    unipoint_t codepoint = __utf8_decode(src, trailing_chars + 1);
+    unipoint_t codepoint = __utf8_decode(src, char_count);
 
     // We consumed the leading char + all trailing characters.
     if (consumed)
-        (*consumed) = (trailing_chars + 1);
+        (*consumed) = char_count;
 
     // Verify this is a valid unicode codepoint.
     if (__codepoint_is_valid(codepoint))
         return UNICODE_REPL_CHAR; // This was an invalid codepoint.
+
+    // It is invalid to encode a codepoint in a less than optimal sequence.
+    if (__utf8_chars_for_codepoint(codepoint) != char_count)
+        return UNICODE_REPL_CHAR; // Return replacement character
 
     // Return the calculated result without encoding metadata.
     return codepoint;
@@ -427,39 +444,43 @@ static inline unipoint_t __codepoint_from_utf32(utf32_char_t *src, size_t src_si
 /* ************************************* */
 
 // Do UTF-X to UTF-Y conversion. These functions are all the same with bit widths changed.
-#define UTFCONV(X, Y)                                                                                   \
-    do {                                                                                                \
-        /* These are useful for calculating the number of chars consumed in each buffer */              \
-        utf ## Y ## _char_t *dest_ptr = dest;                                                           \
-        utf ## X ## _char_t *src_ptr = src;                                                             \
-                                                                                                        \
-        /* For range checking */                                                                        \
-        utf ## Y ## _char_t *dest_end = dest + (*dest_size);                                            \
-        utf ## X ## _char_t *src_end = src + src_size;                                                  \
-                                                                                                        \
-        /* Loop until one of the two buffers is exhausted. */                                           \
-        while ((dest < dest_end) && (src < src_end))                                                    \
-        {                                                                                               \
-            /* How many chars were consumed in this loop? */                                            \
-            size_t consumed;                                                                            \
-                                                                                                        \
-            /* Read out the next codepoint from the src buffer. */                                      \
-            unipoint_t codepoint = __codepoint_from_utf ## X(src, (src_end - src), &consumed, swap);    \
-            src += consumed;                                                                            \
-                                                                                                        \
-            /* Write out the UTF-Y version of the read codepoint. */                                    \
-            dest += __utf ## Y ## _from_codepoint(codepoint, dest, (dest_end - dest), swap);            \
-                                                                                                        \
-            /* The '0' codepoint is NULL and represents the end of a string. */                         \
-            if (!codepoint)                                                                             \
-                break;                                                                                  \
-        }                                                                                               \
-                                                                                                        \
-        /* We consumed the difference in the current dest pointer from the original value. */           \
-        (*dest_size) = (dest - dest_ptr);                                                               \
-                                                                                                        \
-        /* Similarly for the src buffer. */                                                             \
-        return (src - src_ptr);                                                                         \
+#define UTFCONV(X, Y)                                                                                       \
+    do {                                                                                                    \
+        /* These are useful for calculating the number of chars consumed in each buffer */                  \
+        utf ## Y ## _char_t *dest_ptr = dest;                                                               \
+        utf ## X ## _char_t *src_ptr = src;                                                                 \
+                                                                                                            \
+        /* For range checking */                                                                            \
+        utf ## Y ## _char_t *dest_end = dest + (*dest_size);                                                \
+        utf ## X ## _char_t *src_end = src + src_size;                                                      \
+                                                                                                            \
+        /* Loop until one of the two buffers is exhausted. */                                               \
+        while ((dest < dest_end) && (src < src_end))                                                        \
+        {                                                                                                   \
+            /* How many chars were consumed in this loop? */                                                \
+            size_t consumed;                                                                                \
+                                                                                                            \
+            /* Read out the next codepoint from the src buffer. */                                          \
+            unipoint_t codepoint = __codepoint_from_utf ## X(src, (src_end - src), &consumed, swap);        \
+                                                                                                            \
+            /* Write out the UTF-Y version of the read codepoint. */                                        \
+            size_t dest_consumed = __utf ## Y ## _from_codepoint(codepoint, dest, (dest_end - dest), swap); \
+                                                                                                            \
+            /* The '0' codepoint is NULL and represents the end of a string. */                             \
+            if (!codepoint)                                                                                 \
+                break;                                                                                      \
+                                                                                                            \
+            /* We don't count the null terminator as being converted. */                                    \
+            /* Increment these after the above check. */                                                    \
+            dest += dest_consumed;                                                                          \
+            src += consumed;                                                                                \
+        }                                                                                                   \
+                                                                                                            \
+        /* We consumed the difference in the current dest pointer from the original value. */               \
+        (*dest_size) = (dest - dest_ptr);                                                                   \
+                                                                                                            \
+        /* Similarly for the src buffer. */                                                                 \
+        return (src - src_ptr);                                                                             \
     } while (0)
 
 size_t enc_utf8_to_utf16(utf16_char_t *dest, size_t *dest_size, utf8_char_t *src, size_t src_size, bool swap)
@@ -552,16 +573,9 @@ size_t utf16_in_utf8_len(utf16_char_t *str, bool swap)
             // Skip the succeeding low surrogate.
             str++;
         } else {
-            // Otherwise, c is actually a raw codepoint and we have to figure out the specific
-            //   range within which it falls.
-            if (c < UTF8_ONE_CHAR_LIMIT) {
-                length += 1;
-            } else if (c < UTF8_TWO_CHAR_LIMIT) {
-                length += 2;
-            } else {
-                // We don't need 4 chars, so we must need 3.
-                length += 3;
-            }
+            // Otherwise, c is actually a raw codepoint and we have to figure out the
+            //   specific range within which it falls.
+            length += __utf8_chars_for_codepoint(c);
         }
     }
 
@@ -607,15 +621,7 @@ size_t utf32_in_utf8_len(utf32_char_t *str, bool swap)
             c = __byte_swap_32(c);
 
         // Figure out how many chars this char needs in UTF-8 by finding which range it lies within.
-        if (c < UTF8_ONE_CHAR_LIMIT) {
-            length += 1;
-        } else if (c < UTF8_TWO_CHAR_LIMIT) {
-            length += 2;
-        } else if (c < UTF8_THREE_CHAR_LIMIT) {
-            length += 3;
-        } else {
-            length += 4;
-        }
+        length += __utf8_chars_for_codepoint(c);
     }
 
     // Return the calculated result.
@@ -653,11 +659,15 @@ int utf8_validate(utf8_char_t *str, bool swap)
     for (utf8_char_t c = (*str); c; c = (*str))
     {
         // Lookup how many chars trail this one, skip to the next leading char.
-        size_t trailing_chars = UTF8_TRAILING_COUNT[c];
+        size_t char_count = UTF8_TRAILING_COUNT[c] + 1;
+
+        // UTF-8 does not support sequences of more than 4 chars.
+        if (char_count > UTF8_SEQ_MAX_CHARS)
+            return 6;
 
         // Ensure all trailing characters have a valid mark.
         // That is, they all start with a 1 bit followed by a 0 bit.
-        for (size_t j = 1; j < (trailing_chars + 1); j++)
+        for (size_t j = 1; j < char_count; j++)
         {
             // We either have an early null-terminator or a bad char.
             if (!str[j] || !(str[j] >> 7) || ((str[j] >> 6) & 1))
@@ -665,17 +675,21 @@ int utf8_validate(utf8_char_t *str, bool swap)
         }
 
         // Decode the next codepoint
-        unipoint_t codepoint = __utf8_decode(str, (trailing_chars + 1));
+        unipoint_t codepoint = __utf8_decode(str, char_count);
 
         // Check if the decoded codepoint is valid.
-        int validity_result = __codepoint_is_valid((unipoint_t)c);
+        int validity_result = __codepoint_is_valid(codepoint);
 
         // If validity_result is set, this codepoint was not valid.
         if (validity_result)
             return validity_result;
 
+        // Codepoints must be encoded by their minimal sequence.
+        if (char_count != __utf8_chars_for_codepoint(codepoint))
+            return 6;
+
         // Skip past the last sequence
-        str += (trailing_chars + 1);
+        str += char_count;
     }
 
     return 0;
@@ -721,7 +735,7 @@ int utf16_validate(utf16_char_t *str, bool swap)
             unipoint_t codepoint = (unipoint_t)c;
 
             // Check if the decoded codepoint is valid.
-            int validity_result = __codepoint_is_valid((unipoint_t)c);
+            int validity_result = __codepoint_is_valid(codepoint);
 
             // If validity_result is set, this codepoint was not valid.
             if (validity_result)

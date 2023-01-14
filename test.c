@@ -1,63 +1,84 @@
 #include "unicode.h"
 
+#include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
-void test_utf8(utf8_char_t *string)
+#define TEST_X_TO_Y(str, X, Y)                                                                                                      \
+    do {                                                                                                                            \
+        utf ## X ## _char_t *string = (str);                                                                                        \
+                                                                                                                                    \
+        /* Check validity of original string, find length */                                                                        \
+        bool is_valid = (utf ## X ## _validate(string, false) == 0);                                                                \
+        size_t strlen_orig = strlen_utf ## X (string);                                                                              \
+                                                                                                                                    \
+        /* Calculate size in new encoding */                                                                                        \
+        size_t length_utf ## Y = utf ## X ## _in_utf ## Y ## _len(string, false);                                                   \
+                                                                                                                                    \
+        printf("UTF-" #X " to UTF-" #Y " test. Valid string? %s\n", (is_valid ? "yes" : "no"));                                     \
+        printf("UTF-" #X " length: %zu\n", strlen_orig);                                                                            \
+        printf("UTF-" #Y " length: %zu\n", length_utf ## Y);                                                                        \
+                                                                                                                                    \
+        /* Allocate a buffer for conversion */                                                                                      \
+        utf ## Y ## _char_t *buffer = calloc(length_utf ## Y + 1, sizeof(utf ## Y ## _char_t));                                     \
+        size_t converted_length = length_utf ## Y;                                                                                  \
+                                                                                                                                    \
+        /* Allocate a buffer for reverse conversion */                                                                              \
+        utf ## X ## _char_t *rev_buffer = calloc(strlen_orig + 1, sizeof(utf ## X ## _char_t));                                     \
+                                                                                                                                    \
+        /* Memory check */                                                                                                          \
+        if (!buffer || !rev_buffer)                                                                                                 \
+        {                                                                                                                           \
+            perror("calloc");                                                                                                       \
+            return;                                                                                                                 \
+        }                                                                                                                           \
+                                                                                                                                    \
+        /* Ensure everything is null terminated */                                                                                  \
+        buffer[length_utf ## Y] = 0;                                                                                                \
+        rev_buffer[strlen_orig] = 0;                                                                                                \
+                                                                                                                                    \
+        /* Convert UTF-X to UTF-Y */                                                                                                \
+        size_t converted = enc_utf ## X ## _to_utf ## Y (buffer, &converted_length, string, strlen_orig, false);                    \
+                                                                                                                                    \
+        printf("\nConversion result:\n");                                                                                           \
+        printf("length: %zu, converted: %zu\n", strlen_orig, converted);                                                            \
+        printf("buffer size: %zu, consumed: %zu, strlen: %zu\n", length_utf ## Y + 1, converted_length, strlen_utf ## Y (buffer));  \
+        printf("Valid UTF-" #Y "? %s\n", (utf ## Y ## _validate(buffer, false) ? "no" : "yes"));                                    \
+                                                                                                                                    \
+        /* Setup reverse conversion */                                                                                              \
+        converted_length = strlen_orig;                                                                                             \
+                                                                                                                                    \
+        /* Perform reverse conversion */                                                                                            \
+        converted = enc_utf ## Y ## _to_utf ## X (rev_buffer, &converted_length, buffer, length_utf ## Y, false);                   \
+                                                                                                                                    \
+        printf("\nReverse result:\n");                                                                                              \
+        printf("converted UTF-" #Y ": %zu, consumed UTF-" #X ": %zu\n", converted, converted_length);                               \
+        printf("equal? %s\n\n", (memcmp(string, rev_buffer, strlen_orig * sizeof(utf ## X ## _char_t)) ? "no" : "yes"));            \
+                                                                                                                                    \
+        free(rev_buffer);                                                                                                           \
+        free(buffer);                                                                                                               \
+    } while (0)
+
+void test_utf8(utf8_char_t *str)
 {
-    bool valid = (utf8_validate(string, false) == 0);
-    size_t utf8_len = strlen_utf8(string);
+    TEST_X_TO_Y(str, 8, 16);
 
-    size_t utf16_len = utf8_in_utf16_len(string, false);
-    size_t utf32_len = utf8_in_utf32_len(string, false);
-
-    printf("String: '%s' (valid: %s)\n", string, (valid ? "yes" : "no"));
-    printf("UTF-8 strlen: %zu\n", utf8_len);
-    printf("Length in UTF-16: %zu\n", utf16_len);
-    printf("Length in UTF-32: %zu\n\n", utf32_len);
-
-    utf16_char_t *utf16_string = calloc(utf16_len, sizeof(utf16_char_t));
-    utf32_char_t *utf32_string = calloc(utf32_len, sizeof(utf32_char_t));
-
-    if (!utf16_string || !utf32_string)
-    {
-        perror("calloc");
-
-        return;
-    }
-
-    size_t utf16_res_len = utf16_len;
-    size_t utf32_res_len = utf32_len;
-
-    size_t conv16 = enc_utf8_to_utf16(utf16_string, &utf16_res_len, string, utf8_len, false);
-    size_t conv32 = enc_utf8_to_utf32(utf32_string, &utf32_res_len, string, utf8_len, false);
-
-    printf("UTF-16 conversion result:\n");
-    printf("length: %zu, converted: %zu\n", utf8_len, conv16);
-    printf("buffer size: %zu, consumed: %zu, strlen: %zu\n", utf16_len, utf16_res_len, strlen_utf16(utf16_string));
-    printf("valid UTF-16: %s\n\n", (!utf16_validate(utf16_string, false) ? "yes" : "no"));
-
-    printf("UTF-32 conversion result:\n");
-    printf("length: %zu, converted: %zu\n", utf8_len, conv32);
-    printf("buffer size: %zu, consumed: %zu, strlen: %zu\n", utf32_len, utf32_res_len, strlen_utf32(utf32_string));
-    printf("valid UTF-32: %s\n\n", (!utf32_validate(utf32_string, false) ? "yes" : "no"));
-
-    FILE *f16 = fopen("utf16.txt", "wb");
-    if (!f16) return;
-
-    fwrite(utf16_string, sizeof(utf16_char_t), utf16_len, f16);
-    fclose(f16);
-
-    FILE *f32 = fopen("utf32.txt", "wb");
-    if (!f32) return;
-
-    fwrite(utf32_string, sizeof(utf32_char_t), utf32_len, f32);
-    fclose(f32);
+    TEST_X_TO_Y(str, 8, 32);
 }
 
 int main(int argc, const char *const *argv)
 {
-    test_utf8((utf8_char_t *)"H¢llo, 試看看這個嘛, 😁。😁");
+    utf8_char_t *good_string = (utf8_char_t *)"H¢llo, 試看看這個嘛, 😁。😁";
+
+    // This encodes two UTF-16 surrogates.
+    utf8_char_t bad_string_1[7] = {0xED, 0xA1, 0x8C, 0xED, 0xBE, 0xB4, 0x00};
+
+    // This is an encoding of 0 that's too long.
+    utf8_char_t bad_string_2[3] = {0xC0, 0x80, 0x00};
+
+    test_utf8(good_string);
+    test_utf8(bad_string_1);
+    test_utf8(bad_string_2);
 
     return 0;
 }
