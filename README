@@ -1,0 +1,14 @@
+uniconv is a portable Unicode encoding conversion and validation library in a single file (with a header).
+
+As written, this should run on any type of *nix system, although it may use one GCC-specific feature in the form of a byte-swapping builtin function.
+If desired, this could be swapped out by another implementation at the top of unicode.c.
+
+It also uses a single C2x feature, omitting some unused parameter names in a few function definitions. Again this could be changed if desired.
+
+Otherwise, it's quite straightforward to use. A simply `cc --std=c2x -c unicode.c` should provide a usable object file on most systems.
+
+Provided are functions for converting between UTF-8/16/32, calculating encoded sizes of unicode strings in other encodings, validation functions, and string length functions.
+See unicode.h for a more in-depth description of the provided functions.
+
+This is licensed under GPLv2.
+
