@@ -81,11 +81,12 @@ static const uint8_t UTF8_TRAILING_COUNT[0x100] = {
 // Excess value to be subtracted from a codepoint decoded from UTF-8.
 // This value is the metadata used to indicate the number of bytes in a single UTF-8
 //   encoded codepoint. It should be subtracted from the decoded value.
-static const unipoint_t UTF8_ENCODING_OVERFLOW[4] = {
-                                                          (0),
-                                  (0xC0 <<  6) | (0x80 <<  0),
-                   (0xE0 << 12) | (0x80 <<  6) | (0x80 <<  0),
-    (0xF0 << 18) | (0x80 << 12) | (0x80 <<  6) | (0x80 <<  0),
+static const unipoint_t UTF8_ENCODING_OVERFLOW[5] = {
+                                                          (0), // '0' bytes (this isn't a thing)
+                                                          (0), // 1 byte
+                                  (0xC0 <<  6) | (0x80 <<  0), // 2 bytes
+                   (0xE0 << 12) | (0x80 <<  6) | (0x80 <<  0), // 3 bytes
+    (0xF0 << 18) | (0x80 << 12) | (0x80 <<  6) | (0x80 <<  0), // 4 bytes
 };
 
 // Bitmask giving the marker bits for the leading UTF-8 encoded byte.
@@ -297,7 +298,7 @@ static inline unipoint_t __codepoint_from_utf8(utf8_char_t *src, size_t src_size
     utf8_char_t leading_char = (*src);
 
     // Use the leading char to determine how many chars to consume.
-    uint8_t trailing_chars = UTF8_TRAILING_COUNT[leading_char];
+    size_t trailing_chars = UTF8_TRAILING_COUNT[leading_char];
 
     // Ensure the buffer holds a full codepoint based on the calculated number of chars.
     if (src_size < trailing_chars)
@@ -329,7 +330,7 @@ static inline unipoint_t __codepoint_from_utf8(utf8_char_t *src, size_t src_size
         (*consumed) = (trailing_chars + 1);
 
     // Verify this is a valid unicode codepoint.
-    if (!__codepoint_is_valid(codepoint))
+    if (__codepoint_is_valid(codepoint))
         return 0; // This is an invalid codepoint.
 
     // Return the calculated result without encoding metadata.
@@ -378,7 +379,7 @@ static inline unipoint_t __codepoint_from_utf16(utf16_char_t *src, size_t src_si
             (*consumed) = 2;
 
         // Verify this is a valid unicode codepoint.
-        if (!__codepoint_is_valid(codepoint))
+        if (__codepoint_is_valid(codepoint))
             return 0; // This is an invalid codepoint.
 
         // Everything is ok.
@@ -411,7 +412,7 @@ static inline unipoint_t __codepoint_from_utf32(utf32_char_t *src, size_t src_si
         (*consumed) = 1;
 
     // And ensure this is a valid codepoint
-    if (!__codepoint_is_valid(codepoint))
+    if (__codepoint_is_valid(codepoint))
         return 0; // This is an invalid codepoint.
 
     // Just cast.
@@ -425,17 +426,13 @@ static inline unipoint_t __codepoint_from_utf32(utf32_char_t *src, size_t src_si
 // Do UTF-X to UTF-Y conversion. These functions are all the same with bit widths changed.
 #define UTFCONV(X, Y)                                                                                   \
     do {                                                                                                \
-        /* These are compile-time constants, don't mind me... */                                        \
-        (*dest_size) /= sizeof(utf ## Y ## _char_t);                                                        \
-        src_size /= sizeof(utf ## X ## _char_t);                                                            \
-                                                                                                        \
         /* These are useful for calculating the number of chars consumed in each buffer */              \
-        utf ## Y ## _char_t *dest_ptr = dest;                                                               \
-        utf ## X ## _char_t *src_ptr = src;                                                                 \
+        utf ## Y ## _char_t *dest_ptr = dest;                                                           \
+        utf ## X ## _char_t *src_ptr = src;                                                             \
                                                                                                         \
         /* For range checking */                                                                        \
-        utf ## Y ## _char_t *dest_end = dest + (*dest_size);                                                   \
-        utf ## X ## _char_t *src_end = src + src_size;                                                      \
+        utf ## Y ## _char_t *dest_end = dest + (*dest_size);                                            \
+        utf ## X ## _char_t *src_end = src + src_size;                                                  \
                                                                                                         \
         /* Loop until one of the two buffers is exhausted. */                                           \
         while ((dest < dest_end) && (src < src_end))                                                    \
@@ -447,8 +444,8 @@ static inline unipoint_t __codepoint_from_utf32(utf32_char_t *src, size_t src_si
             unipoint_t codepoint = __codepoint_from_utf ## X(src, (src_end - src), &consumed, swap);    \
             src += consumed;                                                                            \
                                                                                                         \
-            /* Write out the UTF-16 version of the read codepoint. */                                   \
-            dest += __utf ## Y ## _from_codepoint(codepoint, dest, (dest_end - dest), swap);                \
+            /* Write out the UTF-Y version of the read codepoint. */                                    \
+            dest += __utf ## Y ## _from_codepoint(codepoint, dest, (dest_end - dest), swap);            \
                                                                                                         \
             /* The '0' codepoint is NULL and represents the end of a string. */                         \
             if (!codepoint)                                                                             \
@@ -493,7 +490,7 @@ size_t utf8_in_utf16_len(utf8_char_t *str, bool)
 
     // Loop through the string until we encounter a null-terminator.
     // `c` is the leading bit of each UTF-8 codepoint sequence.
-    for (utf8_char_t c = (*str); c; str++)
+    for (utf8_char_t c = (*str); c; c = (*str++))
     {
         // Lookup how many chars trail this one, skip to the next leading char.
         size_t trailing_chars = UTF8_TRAILING_COUNT[c];
@@ -502,7 +499,7 @@ size_t utf8_in_utf16_len(utf8_char_t *str, bool)
         // This just so happens to collide, which is nice.
         // Any codepoint that takes 4 chars in UTF-8 takes 2 chars in UTF-16.
         // All other codepoints take 1 char in UTF-16;
-        length += (trailing_chars == 3 ? 2 : 1);
+        length += ((trailing_chars == 3) ? 2 : 1);
     }
 
     // Return the calculated result.
@@ -516,7 +513,7 @@ size_t utf8_in_utf32_len(utf8_char_t *str, bool)
 
     // Loop through the string until we encounter a null-terminator.
     // `c` is the leading bit of each UTF-8 codepoint sequence.
-    for (utf8_char_t c = (*str); c; str++)
+    for (utf8_char_t c = (*str); c; c = (*str++))
     {
         // Lookup how many chars trail this one, skip to the next leading char.
         size_t trailing_chars = UTF8_TRAILING_COUNT[c];
@@ -537,7 +534,7 @@ size_t utf16_in_utf8_len(utf16_char_t *str, bool swap)
 
     // Loop through the string until we encounter a null-terminator.
     // `c` is the leading bit of each UTF-16 sequence.
-    for (utf16_char_t c = (*str); c; str++)
+    for (utf16_char_t c = (*str); c; c = (*str++))
     {
         // Byte swap if requested
         if (swap)
@@ -576,7 +573,7 @@ size_t utf16_in_utf32_len(utf16_char_t *str, bool swap)
 
     // Loop through the string until we encounter a null-terminator.
     // `c` is the leading bit of each UTF-16 sequence.
-    for (utf16_char_t c = (*str); c; str++)
+    for (utf16_char_t c = (*str); c; c = (*str++))
     {
         // Byte swap if requested
         if (swap)
@@ -600,7 +597,7 @@ size_t utf32_in_utf8_len(utf32_char_t *str, bool swap)
     size_t length = 0;
 
     // Loop through the string until we encounter a null-terminator.
-    for (utf32_char_t c = (*str); c; str++)
+    for (utf32_char_t c = (*str); c; c = (*str++))
     {
         // Byte swap if requested
         if (swap)
@@ -628,7 +625,7 @@ size_t utf32_in_utf16_len(utf32_char_t *str, bool swap)
     size_t length = 0;
 
     // Loop through the string until we encounter a null-terminator.
-    for (utf32_char_t c = (*str); c; str++)
+    for (utf32_char_t c = (*str); c; c = (*str++))
     {
         // Byte swap if requested
         if (swap)
@@ -650,7 +647,7 @@ int utf8_validate(utf8_char_t *str, bool swap)
 {
     // Loop through the string until we encounter a null-terminator.
     // `c` is the leading bit of each UTF-8 codepoint sequence.
-    for (utf8_char_t c = (*str); c; )
+    for (utf8_char_t c = (*str); c; c = (*str))
     {
         // Lookup how many chars trail this one, skip to the next leading char.
         size_t trailing_chars = UTF8_TRAILING_COUNT[c];
@@ -685,7 +682,7 @@ int utf16_validate(utf16_char_t *str, bool swap)
 {
     // Loop through the string until we encounter a null-terminator.
     // `c` is the leading bit of each UTF-16 sequence.
-    for (utf16_char_t c = (*str); c; str++)
+    for (utf16_char_t c = (*str); c; c = (*str++))
     {
         // Byte swap if requested
         if (swap)
@@ -709,7 +706,7 @@ int utf16_validate(utf16_char_t *str, bool swap)
             unipoint_t codepoint = __utf16_decode(c, next_char);
 
             // Check if the decoded codepoint is valid.
-            int validity_result = __codepoint_is_valid((unipoint_t)c);
+            int validity_result = __codepoint_is_valid(codepoint);
 
             // If validity_result is set, this codepoint was not valid.
             if (validity_result)
@@ -738,7 +735,7 @@ int utf16_validate(utf16_char_t *str, bool swap)
 int utf32_validate(utf32_char_t *str, bool swap)
 {
     // Loop through the string until we encounter a null-terminator.
-    for (utf32_char_t c = (*str); c; str++)
+    for (utf32_char_t c = (*str); c; c = (*str++))
     {
         // Byte swap if requested
         if (swap)
@@ -781,4 +778,4 @@ size_t strlen_utf16(utf16_char_t *str)
 size_t strlen_utf32(utf32_char_t *str)
 { STRLEN(32); }
 
-#undef STRLEN(X)
+#undef STRLEN
